@@ -23,15 +23,18 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 package io.github.pwlin.cordova.plugins.fileopener2;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.lang.Runnable;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
-//import android.util.Log;
+import android.util.Log;
 
 import org.apache.cordova.CordovaPlugin;
 import org.apache.cordova.CallbackContext;
@@ -79,41 +82,73 @@ public class FileOpener2 extends CordovaPlugin {
 		return true;
 	}
 
-	private void _open(String fileArg, String contentType, CallbackContext callbackContext) throws JSONException {
-		String fileName = "";
-		try {
-			CordovaResourceApi resourceApi = webView.getResourceApi();
-			Uri fileUri = resourceApi.remapUri(Uri.parse(fileArg));
-			fileName = this.stripFileProtocol(fileUri.toString());
-		} catch (Exception e) {
-			fileName = fileArg;
+	private void _open(final String fileArg, final String contentType, final CallbackContext callbackContext) throws JSONException {
+		if (fileArg == null || fileArg.isEmpty()) {
+		    JSONObject errorObj = new JSONObject();
+		    errorObj.put("status", PluginResult.Status.ERROR.ordinal());
+		    errorObj.put("message", "File passed in was empty");
+		    callbackContext.error(errorObj);
+            return;
 		}
-		File file = new File(fileName);
-		if (file.exists()) {
-			try {
-				Uri path = Uri.fromFile(file);
-				Intent intent = new Intent(Intent.ACTION_VIEW);
-				intent.setDataAndType(path, contentType);
-				intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-				/*
-				 * @see
-				 * http://stackoverflow.com/questions/14321376/open-an-activity-from-a-cordovaplugin
-				 */
-				cordova.getActivity().startActivity(intent);
-				//cordova.getActivity().startActivity(Intent.createChooser(intent,"Open File in..."));
-				callbackContext.success();
-			} catch (android.content.ActivityNotFoundException e) {
-				JSONObject errorObj = new JSONObject();
-				errorObj.put("status", PluginResult.Status.ERROR.ordinal());
-				errorObj.put("message", "Activity not found: " + e.getMessage());
-				callbackContext.error(errorObj);
-			}
-		} else {
-			JSONObject errorObj = new JSONObject();
-			errorObj.put("status", PluginResult.Status.ERROR.ordinal());
-			errorObj.put("message", "File not found");
-			callbackContext.error(errorObj);
-		}
+        final CordovaResourceApi resourceApi = webView.getResourceApi();
+        cordova.getThreadPool().execute(new Runnable() {
+            public void run() {
+                try {
+                    Uri fileUri = Uri.parse(fileArg);
+                    try {
+                        fileUri = resourceApi.remapUri(fileUri);
+                        Log.w(FileOpener2.class.getName(), "Parsed url, using this to find file: " + fileArg);
+                    } catch (Exception e) {
+                        Log.w(FileOpener2.class.getName(), "Error while trying to parse url.", e);
+                    }
+                    int uriType = resourceApi.getUriType(fileUri);
+                    File file;
+                    if (uriType == CordovaResourceApi.URI_TYPE_ASSET) {
+                        // copy to local storage
+                        try {
+                            String fileName = new File(fileUri.getPath()).getName();
+                            Uri cacheFileUri = Uri.parse("file://" + cordova.getActivity().getExternalCacheDir().getAbsolutePath() + "/" + fileName);
+                            Log.w(FileOpener2.class.getName(), "Caching file to: " + cacheFileUri.getPath());
+                            resourceApi.copyResource(fileUri, cacheFileUri);
+                            fileUri = cacheFileUri;
+                            Log.w(FileOpener2.class.getName(), "File propertly cached.");
+                        } catch (Exception e) {
+                            Log.w(FileOpener2.class.getName(), "Error while trying to cache file.", e);
+                        }
+
+                    }
+                    file = resourceApi.mapUriToFile(fileUri);
+                    //File file = new File(fileName);
+                    if (file != null && file.exists()) {
+                        try {
+                            Uri path = Uri.fromFile(file);
+                            Intent intent = new Intent(Intent.ACTION_VIEW);
+                            intent.setDataAndType(path, contentType);
+                            intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                            /*
+                                * @see
+                                * http://stackoverflow.com/questions/14321376/open-an-activity-from-a-cordovaplugin
+                                */
+                                cordova.getActivity().startActivity(intent);
+                            //cordova.getActivity().startActivity(Intent.createChooser(intent,"Open File in..."));
+                            callbackContext.success();
+                        } catch (android.content.ActivityNotFoundException e) {
+                            JSONObject errorObj = new JSONObject();
+                            errorObj.put("status", PluginResult.Status.ERROR.ordinal());
+                            errorObj.put("message", "Activity not found: " + e.getMessage());
+                            callbackContext.error(errorObj);
+                        }
+                    } else {
+                        JSONObject errorObj = new JSONObject();
+                        errorObj.put("status", PluginResult.Status.ERROR.ordinal());
+                        errorObj.put("message", "File not found");
+                        callbackContext.error(errorObj);
+                    }
+                } catch (JSONException je) {
+                    Log.w(FileOpener2.class.getName(), "Error while trying to generate an error.", je);
+                }
+            }
+        });
 	}
 	
 	private void _uninstall(String packageId, CallbackContext callbackContext) throws JSONException {
