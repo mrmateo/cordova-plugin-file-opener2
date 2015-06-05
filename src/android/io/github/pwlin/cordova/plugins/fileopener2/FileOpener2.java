@@ -103,7 +103,7 @@ public class FileOpener2 extends CordovaPlugin {
                     }
                     int uriType = resourceApi.getUriType(fileUri);
                     File file;
-                    if (uriType == CordovaResourceApi.URI_TYPE_ASSET) {
+                    if (uriType == CordovaResourceApi.URI_TYPE_ASSET || uriType == CordovaResourceApi.URI_TYPE_HTTPS) {
                         // copy to local storage
                         try {
                             String fileName = new File(fileUri.getPath()).getName();
